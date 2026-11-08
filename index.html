@@ -245,11 +245,11 @@
   </style>
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
+  
   <!-- Firebase SDKs -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBq8QGrBAVk4dV8WZicj_36u2O9QLd0lvo",
@@ -262,18 +262,15 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-    const auth = getAuth(app);
     
     // Attach to window so the main app script can use them
     window.db = db;
-    window.auth = auth;
     window.doc = doc;
     window.setDoc = setDoc;
     window.getDoc = getDoc;
     window.onSnapshot = onSnapshot;
-    window.signInAnonymously = signInAnonymously;
-    window.onAuthStateChanged = onAuthStateChanged;
   </script>
+
 </head>
 <body class="min-h-screen flex flex-col pb-16 md:pb-0">
 
@@ -6375,23 +6372,21 @@
     }
 
     
+    
     // ==================== FIREBASE CLOUD SYNC ENGINE ====================
     let isFirebaseReady = false;
-    let currentUserId = 'demo-user'; 
+    let currentUserId = 'noureddine_apiary'; // Fixed ID for personal use
     let initialCloudLoadDone = false;
     
-    window.addEventListener('load', () => {
-       if (window.auth) {
-           window.signInAnonymously(window.auth).then((userCredential) => {
-               currentUserId = userCredential.user.uid;
-               isFirebaseReady = true;
-               console.log("🔥 Firebase Auth Success. UID:", currentUserId);
-               syncInitialDataFromFirebase();
-           }).catch((error) => {
-               console.error("Firebase Auth Error:", error);
-           });
-       }
-    });
+    // Check every 500ms until window.db is loaded from the module
+    const checkFirebaseInterval = setInterval(() => {
+        if (window.db) {
+            clearInterval(checkFirebaseInterval);
+            isFirebaseReady = true;
+            console.log("🔥 Firebase Firestore Ready!");
+            syncInitialDataFromFirebase();
+        }
+    }, 500);
 
     async function syncInitialDataFromFirebase() {
         if (!isFirebaseReady || !window.db) return;
@@ -6402,20 +6397,14 @@
             if (docSnap.exists()) {
                 const cloudData = docSnap.data();
                 
-                // If cloud has data and it's our first load, we merge/overwrite local
+                // If cloud has data, merge/overwrite local
                 appState = upgradeAndNormalizeState(cloudData);
                 localStorage.setItem('apiary_pro_state_v1', JSON.stringify(appState));
                 initialCloudLoadDone = true;
                 
                 renderAll();
-                showToast('☁️ تم جلب ومزامنة بيانات المنحل من السحابة بنجاح!');
-                
-                const netLbl = document.getElementById('topNetworkLabel');
-                const netDot = document.getElementById('topNetworkDot');
-                if (netLbl) {
-                    netLbl.textContent = 'متصل بالسحابة ☁️';
-                    netDot.className = 'w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse';
-                }
+                showToast('☁️ تم جلب بيانات المنحل من السحابة بنجاح!');
+                updateNetworkUIGreen();
             } else {
                 // First time ever: push current local state to cloud to initialize it
                 initialCloudLoadDone = true;
@@ -6425,14 +6414,13 @@
             // Set up real-time listener for multi-device sync
             window.onSnapshot(docRef, (docSnapUpdate) => {
                 if (docSnapUpdate.exists() && initialCloudLoadDone) {
-                   // We could do a smart merge here, but for now we just log it.
-                   // A full overwrite on snapshot can interrupt typing if the user is editing.
-                   console.log("Cloud data updated.");
+                   console.log("Cloud data updated from another device.");
                 }
             });
             
         } catch (e) {
             console.error("Error syncing from Firebase", e);
+            updateNetworkUIRed();
         }
     }
 
@@ -6440,24 +6428,36 @@
         if (!isFirebaseReady || !window.db) return;
         const docRef = window.doc(window.db, "apiaries", currentUserId);
         
-        // Remove circular or heavy UI states if any, but our appState is clean JSON
-        window.setDoc(docRef, appState).then(() => {
+        // Remove circular refs or heavy non-serializable objects (appState is plain JSON so it's safe)
+        const pureData = JSON.parse(JSON.stringify(appState));
+        
+        window.setDoc(docRef, pureData).then(() => {
             console.log("☁️ State securely saved to Firebase Cloud");
-            const netLbl = document.getElementById('topNetworkLabel');
-            const netDot = document.getElementById('topNetworkDot');
-            if (netLbl && navigator.onLine) {
-                netLbl.textContent = 'متزامن مع السحابة ☁️';
-                netDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
-            }
+            updateNetworkUIGreen();
         }).catch(e => {
             console.error("Cloud sync failed", e);
-            const netLbl = document.getElementById('topNetworkLabel');
-            if (netLbl) {
-                netLbl.textContent = 'خطأ في المزامنة ⚠️';
-                document.getElementById('topNetworkDot').className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
-            }
+            updateNetworkUIRed();
         });
     }
+
+    function updateNetworkUIGreen() {
+        const netLbl = document.getElementById('topNetworkLabel');
+        const netDot = document.getElementById('topNetworkDot');
+        if (netLbl) {
+            netLbl.textContent = 'متزامن مع السحابة ☁️';
+            if (netDot) netDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        }
+    }
+
+    function updateNetworkUIRed() {
+        const netLbl = document.getElementById('topNetworkLabel');
+        const netDot = document.getElementById('topNetworkDot');
+        if (netLbl) {
+            netLbl.textContent = 'خطأ في المزامنة ⚠️';
+            if (netDot) netDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+        }
+    }
+
 
     // ==================== EVENT LISTENERS ====================
     window.addEventListener('DOMContentLoaded', () => {
